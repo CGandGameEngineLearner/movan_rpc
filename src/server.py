@@ -1,5 +1,5 @@
 from kcp.server import Connection
-from kcp.server import KCPServerAsync
+from kcp.server import KCPServerAsync, AddressType
 import msgpack
 import asyncio
 import time
@@ -33,6 +33,8 @@ class RPCServer:
         return func
     
     async def on_data(self, connection: Connection, data: bytes) -> None:
+
+        
         try:
             msg = msgpack.unpackb(data)
             msg_type = msg.get('type')
@@ -42,6 +44,7 @@ class RPCServer:
             return
         
         if msg_type == 'call':
+            # print(self.call(connection.address_tuple,'test_client_subtraction', [1, 2]))
             try:
                 timestamp = msg.get('timestamp')
                 method_name = msg.get('method')
@@ -50,6 +53,7 @@ class RPCServer:
                 method = self.methods.get(method_name)
                 if not method:
                     connection.enqueue(msgpack.packb({'error': f"Method {method_name} not found"}))
+                    return
                 result = method(*args, **kwargs)
                 msg = {'type':'return', 'timestamp' : timestamp,'result' : result}
                 connection.enqueue(msgpack.packb(msg))
@@ -74,7 +78,7 @@ class RPCServer:
             return
             
 
-    def call(self, method:str, params = [], kwargs = {}):
+    def call(self, client_address:AddressType,method:str, params = [], kwargs = {}):
         timestamp:float = time.time()
         msg:bytes = msgpack.packb({
             'type': 'call',
@@ -84,7 +88,7 @@ class RPCServer:
             'kwargs': kwargs
         })
 
-        self.kcp_client.send(msg)
+        self.kcp_server._connections[client_address].enqueue(msg)
 
         while time.time() < timestamp + 5:
             if timestamp in self.return_buffer:
@@ -96,7 +100,7 @@ class RPCServer:
         return None
         
 
-    async def call_async(self, method:str, params = [], kwargs = {}, callback:Callable = None):
+    async def call_async(self, client_address:AddressType, method:str, params = [], kwargs = {}, callback:Callable = None):
         timestamp:float = time.time()
         msg:bytes = msgpack.packb({
             'type': 'call',
@@ -106,7 +110,7 @@ class RPCServer:
             'kwargs': kwargs
         })
 
-        self.kcp_client.send(msg)
+        self.kcp_server._connections[client_address].enqueue(msg)
 
         while time.time() < timestamp + 5:
             if timestamp in self.return_buffer:
@@ -130,10 +134,13 @@ class RPCServer:
 async def print_data(connection: Connection, data: bytes):
     print("server on data")
 
-def test_add(x, y):
-    return x + y
+
 
 if __name__ == "__main__":
     server = RPCServer('127.0.0.1', 9999)
-    server.register_method('add', test_add)
+
+    @server.method
+    def test_server_add(a, b):
+        return a + b
+    
     server.start()

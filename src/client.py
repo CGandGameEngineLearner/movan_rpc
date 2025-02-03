@@ -40,7 +40,7 @@ class RPCClient:
     
     def on_start(self):
         print('Connection established')
-        print(self.call('add', [1, 2]))
+        print(self.call('test_server_add', [1, 2]))
         
 
     
@@ -133,16 +133,14 @@ class RPCClient:
             callback(None)
         return None
 
+
     
-def print_result(x):
-    print(f'Result: {x}')
 
-
-
-async def main():
-    client = RPCClient('127.0.0.1', 9999)
-    client.start()
-    
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    client = RPCClient('127.0.0.1', 9999)
+    client.start()
+
+    @client.method
+    def test_client_subtraction(a, b):
+        return a - b
