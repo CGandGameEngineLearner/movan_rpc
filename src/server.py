@@ -5,17 +5,21 @@ import asyncio
 from typing import Dict, Callable
 
 class RPCServer:
-    def __init__(self, host:str, port:int):
-        self.host = host
+    def __init__(self, address:str, port:int):
+        self.host = address
         self.port = port
         self.methods:Dict[str,Callable] = {}
         self.kcp_server:KCPServerAsync = KCPServerAsync(
-            host = host,
+            address = address,
             port = port,
             conv_id = 1,
             no_delay= True
+            
         )
-        self.kcp_server.on_data = self.on_data
+        self.kcp_server.set_performance_options(
+            update_interval=10,
+        )
+        self.kcp_server.on_data(self.on_data)
     
 
 
@@ -29,25 +33,30 @@ class RPCServer:
         self.register_method(func.__name__, func)
         return func
     
-    def on_data(self, data:bytes, conn:Connection):
+    async def on_data(self, connection: Connection, data: bytes) -> None:
+        print("server on data")
         try:
             data = msgpack.unpackb(data)
+            timestamp = data.get('timestamp')
             method_name = data.get('method')
             args = data.get('args', [])
             kwargs = data.get('kwargs', {})
             method = self.methods.get(method_name)
             if not method:
-                conn.send(msgpack.packb({'error': f"Method {method_name} not found"}))
+                connection.enqueue(msgpack.packb({'error': f"Method {method_name} not found"}))
             result = method(*args, **kwargs)
-            conn.send(msgpack.packb(result))
+            msg = {'timestamp' : timestamp,'result' : result}
+            connection.enqueue(msgpack.packb(msg))
         except Exception as e:
-            conn.send(msgpack.packb({'error': str(e)}))
+            connection.enqueue(msgpack.packb({'error': str(e)}))
         
         
 
-    async def start(self):
-        self.kcp_server.start()
-        await self.handle_client()
+    def start(self):
+       self.kcp_server.start()
+
+async def print_data(connection: Connection, data: bytes):
+    print("server on data")
 
 def add(x, y):
     return x + y
@@ -55,4 +64,4 @@ def add(x, y):
 if __name__ == "__main__":
     server = RPCServer('127.0.0.1', 9999)
     server.register_method('add', add)
-    asyncio.run(server.start_server())
+    server.start()
