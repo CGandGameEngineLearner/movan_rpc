@@ -8,6 +8,7 @@ class RPCClient:
     def __init__(self, address:str, port:int):
         self.host:str = address
         self.port:int = port
+        self.methods:Dict[str,Callable] = {}
         self.kcp_client:KCPClientSync = KCPClientSync(
             address = address,
             port = port,
@@ -22,7 +23,17 @@ class RPCClient:
         
         self.kcp_client.on_data(self.on_data)
         self.kcp_client.on_start(self.on_start)
-        self.message_buffer:Dict[float,Any] = {}
+        self.return_buffer:Dict[float,Any] = {}
+
+    def register_method(self, name:str, method:Callable):
+        if self.methods.get(name):
+            raise Exception(f"Method {name} already registered")
+        self.methods[name] = method
+
+    # Decorator to register method
+    def method(self, func: Callable):
+        self.register_method(func.__name__, func)
+        return func
 
     def start(self):
         self.kcp_client.start()
@@ -34,35 +45,62 @@ class RPCClient:
 
     
     def on_data(self, data:bytes):
-        print('Data received')
         try:
-            message = msgpack.unpackb(data)
-            if message.get('error'):
-                print(f'Error: {message["error"]}')
-                return
-            timestamp:float = message.get('timestamp')
-            if timestamp is None:
-                raise Exception('No timestamp')
-            result = message.get('result')
-            if result is None:
-                raise Exception('No result')
-            self.message_buffer[timestamp] = result
+            msg = msgpack.unpackb(data)
+            msg_type = msg.get('type')
+            if msg_type is None:
+                raise Exception('No type')
         except Exception as e:
-            print(f'Error: {e}')
+            return
+        if msg_type == 'call':
+            try:
+                timestamp = msg.get('timestamp')
+                method_name = msg.get('method')
+                args = msg.get('args', [])
+                kwargs = msg.get('kwargs', {})
+                method = self.methods.get(method_name)
+                if not method:
+                    self.call(msgpack.packb({'error': f"Method {method_name} not found"}))
+                    return
+                result = method(*args, **kwargs)
+                msg = {'type':'return', 'timestamp' : timestamp,'result' : result}
+                self.call(msgpack.packb(msg))
+            except Exception as e:
+                self.call(msgpack.packb({'error': str(e)}))
+        elif msg_type == 'return':
+            try:
+                timestamp:float = msg.get('timestamp')
+                if timestamp is None:
+                    raise Exception('No timestamp')
+                error = msg.get('error')
+                if error:
+                    self.return_buffer[timestamp] = error
+                    return
+                result = msg.get('result')
+                if result is None:
+                    raise Exception('No result')
+                self.return_buffer[timestamp] = result
+            except Exception as e:
+                return
+        else:
+            return
 
     def call(self, method:str, params = [], kwargs = {}):
         timestamp:float = time.time()
-        self.kcp_client.send(msgpack.packb({
+        msg:bytes = msgpack.packb({
+            'type': 'call',
             'timestamp': timestamp,
             'method': method,
             'args': params,
             'kwargs': kwargs
-        }))
+        })
+
+        self.kcp_client.send(msg)
 
         while time.time() < timestamp + 5:
-            if timestamp in self.message_buffer:
-                result = self.message_buffer[timestamp]
-                del self.message_buffer[timestamp]
+            if timestamp in self.return_buffer:
+                result = self.return_buffer[timestamp]
+                del self.return_buffer[timestamp]
                 return result
         
         print('Timeout')
@@ -71,17 +109,20 @@ class RPCClient:
 
     async def call_async(self, method:str, params = [], kwargs = {}, callback:Callable = None):
         timestamp:float = time.time()
-        self.kcp_client.send(msgpack.packb({
+        msg:bytes = msgpack.packb({
+            'type': 'call',
             'timestamp': timestamp,
             'method': method,
             'args': params,
             'kwargs': kwargs
-        }))
+        })
+
+        self.kcp_client.send(msg)
 
         while time.time() < timestamp + 5:
-            if timestamp in self.message_buffer:
-                result = self.message_buffer[timestamp]
-                del self.message_buffer[timestamp]
+            if timestamp in self.return_buffer:
+                result = self.return_buffer[timestamp]
+                del self.return_buffer[timestamp]
                 if callback is not None:
                     callback(result)
                 return result
