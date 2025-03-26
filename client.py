@@ -1,9 +1,11 @@
 import asyncio
 import json
 import time
-import threading
+
 import inspect
-from typing import Dict, Any, Callable, Optional, List, Union
+from typing import Dict, Any, Callable, Optional, List, Union,Tuple
+import uuid
+import utils
 
 class RPCClient:
     def __init__(self, address: str, port: int):
@@ -13,10 +15,14 @@ class RPCClient:
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.connected = False
-        self.return_buffer: Dict[float, Dict[str, Any]] = {}
+        self._return_buffer: Dict[(float,str), Dict[str, Any]] = {}
         self._running_task = None
         self._loop = None
-        self._lock = threading.Lock()
+
+        self._return_buffer_lock = asyncio.Lock()
+        self._call_buffer:Dict[Tuple[float,str],Any] = {}
+        self._call_buffer_lock = asyncio.Lock()
+
 
     def register_method(self, name: str, method: Callable):
         if self.methods.get(name):
@@ -46,6 +52,19 @@ class RPCClient:
     def method(self, func: Callable):
         self.register_method(func.__name__, func)
         return func
+    
+    async def handle_call_buffer(self):
+        async with self._call_buffer_lock:
+            for (timestamp,id), result in self._call_buffer.items():
+                response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
+                await self._send_message(response)
+            self._call_buffer.clear()
+            
+
+    async def _compute_result(self,timestamp:float,id:str,result):
+        result = await result
+        async with self._call_buffer_lock:
+            self._call_buffer[(timestamp,id)] = result
 
     async def connect(self):
         """连接到服务器"""
@@ -81,53 +100,57 @@ class RPCClient:
             self.connected = False
 
     async def _handle_data(self, data: bytes):
-        """处理接收到的数据"""
         try:
             msg = json.loads(data.decode('utf-8'))
-            msg_type = msg.get('type')
-            if msg_type is None:
-                raise Exception('没有类型字段')
-        except Exception as e:
-            print(f"解析数据错误: {e}")
-            return
             
+            if not utils.verify_msg(msg):
+                raise Exception('消息格式错误')
+        except Exception as e:
+            print(f"解析数据时出错:{e}")
+            return
+        
+        msg_type = msg.get('type')
+        
         if msg_type == 'call':
             try:
                 timestamp = msg.get('timestamp')
+                id:str = msg.get('id')
                 method_name = msg.get('method')
                 args = msg.get('args', [])
                 kwargs = msg.get('kwargs', {})
                 method = self.methods.get(method_name)
                 if not method:
-                    error_response = {'type': 'return', 'timestamp': timestamp, 'error': f"方法 {method_name} 未找到"}
+                    error_response = {'type': 'return', 'timestamp': timestamp, 'id': id,'error': f"方法 {method_name} 未找到"}
                     await self._send_message(error_response)
                     return
                     
                 # 处理同步和异步方法
                 result = method(*args, **kwargs)
+
+                # 异步方法异步执行完后才发送返回消息
                 if asyncio.iscoroutine(result):
-                    result = await result
+                    asyncio.create_task(self._compute_result(timestamp,id,result))
+                    return
                     
-                response = {'type': 'return', 'timestamp': timestamp, 'result': result}
+                response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
                 await self._send_message(response)
             except Exception as e:
-                error_response = {'type': 'return', 'timestamp': timestamp, 'error': str(e)}
+                error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': str(e)}
                 await self._send_message(error_response)
         elif msg_type == 'return':
             try:
                 timestamp: float = msg.get('timestamp')
+                id:str = msg.get('id')
                 if timestamp is None:
-                    raise Exception('没有时间戳')
+                    return
                 error = msg.get('error')
                 if error:
-                    with self._lock:
-                        self.return_buffer[timestamp] = {'error': error}
+                    with self._return_buffer_lock:
+                        self._return_buffer[(timestamp,id)] = {'error': error}
                     return
                 result = msg.get('result')
-                if result is None:
-                    raise Exception('没有结果')
-                with self._lock:
-                    self.return_buffer[timestamp] = {'result': result}
+                with self._return_buffer_lock:
+                    self._return_buffer[(timestamp,id)] = {'result': result}
             except Exception as e:
                 print(f"处理返回错误: {e}")
                 return
@@ -155,9 +178,10 @@ class RPCClient:
 
     async def call(self, method: str, params: List = None, kwargs: Dict = None, timeout: float = 5.0) -> Any:
         """
-        异步调用远程方法
+        异步调用客户端方法
         
         参数:
+            client_address: 客户端地址元组 (ip, port)
             method: 要调用的方法名
             params: 位置参数列表
             kwargs: 关键字参数字典
@@ -166,34 +190,33 @@ class RPCClient:
         返回:
             方法的返回值，如果出现错误则抛出异常
         """
-        if not self.connected:
-            raise ConnectionError("未连接到服务器")
-            
         if params is None:
             params = []
         if kwargs is None:
             kwargs = {}
             
         timestamp: float = time.time()
+        id = str(uuid.uuid4())
         msg = {
             'type': 'call',
             'timestamp': timestamp,
             'method': method,
             'args': params,
-            'kwargs': kwargs
+            'kwargs': kwargs,
+            'id':id
         }
         
-        await self._send_message(msg)
+        self._send_message(msg)
         
         # 等待响应
-        wait_step = 0.1  # 每次等待的时间（秒）
+        wait_step = 0.01  # 每次等待的时间（秒）
         steps = int(timeout / wait_step)
         
         for _ in range(steps):
-            with self._lock:
-                if timestamp in self.return_buffer:
-                    result_data = self.return_buffer[timestamp]
-                    del self.return_buffer[timestamp]
+            with self._return_buffer_lock:
+                if (timestamp,id) in self._return_buffer.keys():
+                    result_data = self._return_buffer[(timestamp,id)]
+                    del self._return_buffer[(timestamp,id)]
                     
                     # 检查是否有错误
                     if 'error' in result_data:
@@ -285,7 +308,7 @@ class RPCClient:
             # 保持客户端运行
             try:
                 while self.connected:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.01)
             except KeyboardInterrupt:
                 print("客户端正在关闭...")
             finally:

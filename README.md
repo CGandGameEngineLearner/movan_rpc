@@ -161,3 +161,101 @@ python src/example.py
 - 默认调用超时时间为5秒，可以在调用时自定义
 - 服务器和客户端都支持同步和异步方法
 - 通信使用TCP协议，所以需要网络连接 
+
+## 装饰器使用说明
+
+### 服务器端装饰器
+
+1. **server_method_stub 装饰器**
+   ```python
+   from server import server_method_stub
+   
+   class MyServer(RPCServer):
+       def __init__(self, host, port):
+           super().__init__(host, port)
+           
+       @server_method_stub
+       def decorated_method(self, a, b):
+           return a + b
+   ```
+
+2. **直接注册方法**
+   ```python
+   class MyServer(RPCServer):
+       def __init__(self, host, port):
+           super().__init__(host, port)
+           # 直接注册方法
+           self.register_method("method_name", self.method_impl)
+           
+       def method_impl(self, a, b):
+           return a + b
+   ```
+
+### 客户端装饰器
+
+1. **client_method_stub 装饰器**
+   ```python
+   from client import client_method_stub
+   
+   class MyClient(RPCClient):
+       def __init__(self, host, port):
+           super().__init__(host, port)
+           
+       @client_method_stub
+       def decorated_method(self, a, b):
+           return a - b
+   ```
+
+2. **直接注册方法**
+   ```python
+   class MyClient(RPCClient):
+       def __init__(self, host, port):
+           super().__init__(host, port)
+           # 直接注册方法
+           self.register_method("method_name", self.method_impl)
+           
+       def method_impl(self, a, b):
+           return a - b
+   ```
+
+### 装饰器使用注意事项
+
+1. 装饰器方法支持同步和异步实现
+2. 装饰器方法可以像普通方法一样被调用
+3. 装饰器会自动处理方法的注册，无需手动注册
+
+### 完整示例
+
+```python
+import asyncio
+from server import RPCServer, server_method_stub
+from client import RPCClient, client_method_stub
+
+# 服务器端
+class MyServer(RPCServer):
+    def __init__(self, host, port):
+        super().__init__(host, port)
+        
+    @server_method_stub
+    def decorated_add(self, a, b):
+        return a + b
+        
+    @server_method_stub
+    async def decorated_async_process(self, data):
+        await asyncio.sleep(0.5)
+        return f"处理完成: {data}"
+
+# 客户端
+class MyClient(RPCClient):
+    def __init__(self, host, port):
+        super().__init__(host, port)
+        
+    @client_method_stub
+    def decorated_subtract(self, a, b):
+        return a - b
+        
+    @client_method_stub
+    async def decorated_async_process(self, data):
+        await asyncio.sleep(0.5)
+        return f"处理完成: {data}"
+``` 
