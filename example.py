@@ -36,6 +36,10 @@ class MyRPCServer(RPCServer):
         self.register_method("sync_multiply", self.sync_multiply)
         self.register_method("get_time", self.get_time)
         self.register_method("get_random_number", self.get_random_number)
+        
+        # 使用装饰器注册方法
+        self.register_method("decorated_add", self.decorated_add)
+        self.register_method("decorated_async_process", self.decorated_async_process)
     
     # 异步方法示例
     async def async_add(self, a, b):
@@ -58,6 +62,29 @@ class MyRPCServer(RPCServer):
         """返回随机数，演示默认参数"""
         return random.randint(min_val, max_val)
     
+    # 使用装饰器的方法示例
+    def decorated_add(self, a, b):
+        """使用装饰器注册的同步方法"""
+        print(f"服务器装饰器方法执行: {a} + {b}")
+        return a + b
+    
+    async def decorated_async_process(self, data):
+        """使用装饰器注册的异步方法"""
+        print(f"服务器装饰器异步方法执行: {data}")
+        await asyncio.sleep(0.3)
+        return f"服务器已处理: {data}"
+    
+    # 使用 client_method_stub 装饰器的方法示例
+    def call_client_decorated_method(self, client_addr, a, b):
+        """使用装饰器调用客户端方法"""
+        print(f"服务器调用客户端装饰器方法: {a} - {b}")
+        return self.call_sync(client_addr, 'decorated_subtract', [a, b])
+    
+    async def call_client_decorated_async_method(self, client_addr, data):
+        """使用装饰器异步调用客户端方法"""
+        print(f"服务器调用客户端装饰器异步方法: {data}")
+        return await self.call(client_addr, 'decorated_async_process', [data])
+    
     # 调用客户端方法示例
     async def call_client_methods(self):
         """调用所有已连接客户端的方法"""
@@ -77,6 +104,15 @@ class MyRPCServer(RPCServer):
                     print(f"客户端信息: {result}")
                 except Exception as e:
                     print(f"调用get_client_info失败: {e}")
+                
+                # 使用装饰器调用客户端方法
+                print(f"\n使用装饰器调用客户端 {client_addr} 的方法:")
+                result = await self.call_client_decorated_async_method(client_addr, "测试数据")
+                print(f"客户端装饰器异步方法结果: {result}")
+                
+                result = self.call_client_decorated_method(client_addr, 15, 6)
+                print(f"客户端装饰器同步方法结果: 15 - 6 = {result}")
+                
             except Exception as e:
                 print(f"调用客户端方法失败: {e}")
 
@@ -122,6 +158,10 @@ class MyRPCClient(RPCClient):
         self.register_method("async_process", self.async_process)
         self.register_method("get_client_info", self.get_client_info)
         
+        # 使用装饰器注册方法
+        self.register_method("decorated_subtract", self.decorated_subtract)
+        self.register_method("decorated_async_process", self.decorated_async_process)
+    
     # 同步方法示例
     def subtract(self, a, b):
         """减法示例 - 被服务器调用"""
@@ -143,6 +183,29 @@ class MyRPCClient(RPCClient):
             "status": "在线"
         }
         
+    # 使用装饰器的方法示例
+    def decorated_subtract(self, a, b):
+        """使用装饰器注册的同步方法"""
+        print(f"客户端[{self.client_id}]装饰器方法执行: {a} - {b}")
+        return a - b
+    
+    async def decorated_async_process(self, data):
+        """使用装饰器注册的异步方法"""
+        print(f"客户端[{self.client_id}]装饰器异步方法执行: {data}")
+        await asyncio.sleep(0.3)
+        return f"客户端已处理: {data}"
+    
+    # 使用 server_method_stub 装饰器的方法示例
+    def call_server_decorated_method(self, a, b):
+        """使用装饰器调用服务器方法"""
+        print(f"客户端调用服务器装饰器方法: {a} + {b}")
+        return self.call_sync('decorated_add', [a, b])
+    
+    async def call_server_decorated_async_method(self, data):
+        """使用装饰器异步调用服务器方法"""
+        print(f"客户端调用服务器装饰器异步方法: {data}")
+        return await self.call('decorated_async_process', [data])
+    
     async def run_demo(self):
         """运行演示"""
         print(f"\n===客户端[{self.client_id}]开始运行===")
@@ -175,6 +238,14 @@ class MyRPCClient(RPCClient):
                 # 获取服务器时间
                 result = await self.call('get_time')
                 print(f"服务器时间: {result}")
+                
+                # 使用装饰器调用服务器方法
+                print("\n使用装饰器调用服务器方法:")
+                result = await self.call('decorated_async_process', ["测试数据"])
+                print(f"服务器装饰器异步方法结果: {result}")
+                
+                result = await self.call('decorated_add', [8, 9])
+                print(f"服务器装饰器同步方法结果: 8 + 9 = {result}")
                 
                 # 演示错误处理
                 try:
