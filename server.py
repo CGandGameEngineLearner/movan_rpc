@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+import inspect
 from typing import Dict, Any, Callable, Tuple, Optional, List, Union
 import threading
 
@@ -33,6 +34,27 @@ class RPCServer:
         if self.methods.get(name):
             raise Exception(f"方法 {name} 已经注册")
         self.methods[name] = method
+
+    def client_method_stub(self, func: Callable):
+        def sync_wrapper(*args, **kwargs):
+            # 非异步函数的处理
+            if not isinstance(args[0], AddressType):
+                raise Exception("第一个参数必须是AddressType类型的IP地址")
+            result = self.call_sync(func.__name__, *args, **kwargs)
+            return result
+        
+        async def async_wrapper(*args, **kwargs):
+            # 异步函数的处理
+            if not isinstance(args[0], AddressType):
+                raise Exception("第一个参数必须是AddressType类型的IP地址")
+            result = await self.call(func.__name__, *args, **kwargs)
+            return result
+        
+        # 判断是否为异步函数
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
 
     # 装饰器注册方法
     def method(self, func: Callable):
@@ -182,7 +204,7 @@ class RPCServer:
         await self.send_response(connection, msg)
         
         # 等待响应
-        wait_step = 0.1  # 每次等待的时间（秒）
+        wait_step = 0.01  # 每次等待的时间（秒）
         steps = int(timeout / wait_step)
         
         for _ in range(steps):
