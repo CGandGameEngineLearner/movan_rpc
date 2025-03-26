@@ -16,6 +16,7 @@ class Connection:
         self.writer = writer
         self.address_tuple = writer.get_extra_info('peername')
         
+        
     async def send(self, data: bytes) -> None:
         self.writer.write(data)
         await self.writer.drain()
@@ -26,14 +27,19 @@ class RPCServer:
         self.port = port
         self.methods: Dict[str, Callable] = {}
         self.connections: Dict[AddressType, Connection] = {}
-        self.return_buffer: Dict[Tuple[float,str], Any] = {}
+        self.return_buffer: Dict[Tuple[str,str], Any] = {}
         self.server = None
         self._loop = None
         self._started = False
         self._return_buffer_lock = asyncio.Lock()
-        self._call_buffer:Dict[Tuple[float,str,Connection],Any] = {}
+        self._call_buffer:Dict[Tuple[str,str,Connection],Any] = {}
         self._call_buffer_lock = asyncio.Lock()
         
+        self.register_method("init_connect",self._init_connect)
+
+    def _init_connect(self):
+        return True
+
     def register_method(self, name: str, method: Callable):
         if self.methods.get(name):
             raise Exception(f"方法 {name} 已经注册")
@@ -116,7 +122,8 @@ class RPCServer:
             if not utils.verify_msg(msg):
                 raise Exception('消息格式错误')
         except Exception as e:
-            print(f"解析数据时出错:{e}")
+            error_response = {'error': str(e)}
+            await self.send_response(connection,error_response)
             return
         
         msg_type = msg.get('type')
@@ -156,11 +163,11 @@ class RPCServer:
                     return
                 error = msg.get('error')
                 if error:
-                    with self._return_buffer_lock:
+                    async with self._return_buffer_lock:
                         self.return_buffer[(timestamp,id)] = {'error': error}
                     return
                 result = msg.get('result')
-                with self._return_buffer_lock:
+                async with self._return_buffer_lock:
                     self.return_buffer[(timestamp,id)] = {'result': result}
             except Exception as e:
                 print(f"处理返回错误: {e}")
@@ -185,9 +192,8 @@ class RPCServer:
             raise RuntimeError("服务器尚未启动，无法调用")
             
         # 创建一个Future来存储结果
-        future = asyncio.run_coroutine_threadsafe(
-            self.call(client_address, method, params, kwargs, timeout), 
-            self._loop
+        future = asyncio.create_task(
+            self.call(client_address, method, params, kwargs, timeout)
         )
         
         # 等待结果返回
@@ -212,7 +218,7 @@ class RPCServer:
         if kwargs is None:
             kwargs = {}
             
-        timestamp: float = time.time()
+        timestamp: str = str(time.time())
         id = str(uuid.uuid4())
         msg = {
             'type': 'call',
@@ -231,11 +237,11 @@ class RPCServer:
         await self.send_response(connection, msg)
         
         # 等待响应
-        wait_step = 0.01  # 每次等待的时间（秒）
+        wait_step = 0.1  # 每次等待的时间（秒）
         steps = int(timeout / wait_step)
         
         for _ in range(steps):
-            with self._return_buffer_lock:
+            async with self._return_buffer_lock:
                 if (timestamp,id) in self.return_buffer.keys():
                     result_data = self.return_buffer[(timestamp,id)]
                     del self.return_buffer[(timestamp,id)]
@@ -275,12 +281,3 @@ class RPCServer:
         """运行服务器（阻塞）"""
         asyncio.run(self.start())
 
-if __name__ == "__main__":
-    server = RPCServer('127.0.0.1', 9999)
-
-    @server.method
-    def test_server_add(a, b):
-        return a + b
-    
-    # 启动服务器（阻塞调用）
-    server.run()

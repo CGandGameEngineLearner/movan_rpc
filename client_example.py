@@ -23,7 +23,7 @@ async def server_add_async(a:int, b:int):
 
 async def run_client():
     asyncio.create_task(client.start())
-    await asyncio.sleep(3)
+    await asyncio.sleep(8)
     result = await client.call('server_add', [6, 2])
     print(result)
     result = client.call_sync('server_add', [6, 3])

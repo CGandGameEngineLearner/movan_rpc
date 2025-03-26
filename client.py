@@ -15,12 +15,12 @@ class RPCClient:
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.connected = False
-        self._return_buffer: Dict[(float,str), Dict[str, Any]] = {}
+        self._return_buffer: Dict[(str,str), Dict[str, Any]] = {}
         self._running_task = None
         self._loop = None
 
         self._return_buffer_lock = asyncio.Lock()
-        self._call_buffer:Dict[Tuple[float,str],Any] = {}
+        self._call_buffer:Dict[Tuple[str,str],Any] = {}
         self._call_buffer_lock = asyncio.Lock()
 
 
@@ -145,11 +145,11 @@ class RPCClient:
                     return
                 error = msg.get('error')
                 if error:
-                    with self._return_buffer_lock:
+                    async with self._return_buffer_lock:
                         self._return_buffer[(timestamp,id)] = {'error': error}
                     return
                 result = msg.get('result')
-                with self._return_buffer_lock:
+                async with self._return_buffer_lock:
                     self._return_buffer[(timestamp,id)] = {'result': result}
             except Exception as e:
                 print(f"处理返回错误: {e}")
@@ -195,7 +195,7 @@ class RPCClient:
         if kwargs is None:
             kwargs = {}
             
-        timestamp: float = time.time()
+        timestamp: str = str(time.time())
         id = str(uuid.uuid4())
         msg = {
             'type': 'call',
@@ -206,14 +206,14 @@ class RPCClient:
             'id':id
         }
         
-        self._send_message(msg)
+        await self._send_message(msg)
         
         # 等待响应
-        wait_step = 0.01  # 每次等待的时间（秒）
+        wait_step = 0.1  # 每次等待的时间（秒）
         steps = int(timeout / wait_step)
         
         for _ in range(steps):
-            with self._return_buffer_lock:
+            async with self._return_buffer_lock:
                 if (timestamp,id) in self._return_buffer.keys():
                     result_data = self._return_buffer[(timestamp,id)]
                     del self._return_buffer[(timestamp,id)]
@@ -245,33 +245,14 @@ class RPCClient:
         if self._loop is None:
             raise RuntimeError("客户端未启动，无法使用同步调用")
 
-        # 在现有事件循环中执行异步调用
-        future = asyncio.run_coroutine_threadsafe(
-            self.call(method, params, kwargs, timeout),
-            self._loop
+        
+        future = asyncio.create_task(
+            self.call(method, params, kwargs, timeout)
         )
         return future.result()  # 这会阻塞直到结果返回
         
-    def blocking_call(self, method: str, params: List = None, kwargs: Dict = None, timeout: float = 5.0) -> Any:
-        """
-        阻塞式调用远程方法（创建新的事件循环）
         
-        当在没有事件循环的线程中使用时，此方法会创建一个临时事件循环
-        
-        参数同call_sync
-        """
-        # 创建新的事件循环来执行此调用
-        return asyncio.run(self._blocking_call_helper(method, params, kwargs, timeout))
-        
-    async def _blocking_call_helper(self, method: str, params: List = None, kwargs: Dict = None, timeout: float = 5.0) -> Any:
-        """帮助函数，用于阻塞调用"""
-        # 如果未连接，先连接
-        if not self.connected:
-            if not await self.connect():
-                raise ConnectionError("无法连接到服务器")
-                
-        # 执行调用
-        return await self.call(method, params, kwargs, timeout)
+
 
     async def start_async(self):
         """异步启动客户端"""
@@ -293,16 +274,16 @@ class RPCClient:
         print('连接已建立')
         # 示例: 调用远程方法
         try:
-            result = await self.call('test_server_add', [1, 2])
+            result = await self.call('init_connect')
             print(f"远程调用结果: {result}")
         except Exception as e:
             print(f"示例调用失败: {e}")
 
-    def start(self):
+    def run(self):
         """同步启动客户端（阻塞）"""
-        asyncio.run(self.run())
+        asyncio.run(self.start())
         
-    async def run(self):
+    async def start(self):
         """运行客户端主循环"""
         if await self.start_async():
             # 保持客户端运行
@@ -323,12 +304,3 @@ class RPCClient:
         if self._running_task:
             self._running_task.cancel()
 
-if __name__ == "__main__":
-    client = RPCClient('127.0.0.1', 9999)
-    
-    @client.method
-    def test_client_subtraction(a, b):
-        return a - b
-    
-    # 启动客户端（阻塞调用）
-    client.start()

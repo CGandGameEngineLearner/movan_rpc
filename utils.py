@@ -7,11 +7,11 @@ def verify_msg(msg:Dict)->bool:
         return False
 
     timestamp = msg.get('timestamp')
-    if isinstance(timestamp,float):
+    if not isinstance(timestamp,str):
         return False
     
-    uuid = msg.get('uuid')
-    if isinstance(uuid,str):
+    id = msg.get('id')
+    if not isinstance(id,str):
         return False
 
     return True

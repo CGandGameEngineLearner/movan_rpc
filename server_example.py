@@ -41,7 +41,7 @@ async def client_hello(client_address:AddressType, data:str):
 # 启动服务器
 async def run_server():
     asyncio.create_task(server.start())
-    await asyncio.sleep(3)
+    await asyncio.sleep(8)
     for client_address in server.connections.keys():
         asyncio.create_task(call_client_method(client_address))
         call_client_sync(client_address)
