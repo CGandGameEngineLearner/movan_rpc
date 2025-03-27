@@ -19,7 +19,7 @@ class Connection:
         
         
     async def send(self, data: bytes) -> None:
-        print(data)
+        # print(data)
         self.writer.write(data)
         await self.writer.drain()
         
