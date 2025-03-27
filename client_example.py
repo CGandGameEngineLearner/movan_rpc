@@ -5,7 +5,7 @@ client = RPCClient('127.0.0.1', 9999)
 
 
 @client.server_method_stub
-def server_add(a:int, b:int):
+async def server_add(a:int, b:int):
     pass
 
 @client.server_method_stub
@@ -33,12 +33,7 @@ async def run_client():
         
         print("开始调用服务器方法...")
         
-        # 使用异常处理保护每一次调用
-        try:
-            result = client.call_sync('server_add', [6, 2], timeout=10.0)
-            print(f"第一次server_add结果: {result}")
-        except Exception as e:
-            print(f"调用server_add失败: {e}")
+       
         
         # 短暂暂停
         await asyncio.sleep(0.5)
@@ -46,9 +41,9 @@ async def run_client():
         try:
             # 使用异步调用替代同步调用
             result = await client.call('server_add', [6, 3])
-            print(f"第二次server_add结果: {result}")
+            print(f"server_add结果: {result}")
         except Exception as e:
-            print(f"第二次调用server_add失败: {e}")
+            print(f"server_add失败: {e}")
         
         await asyncio.sleep(0.5)
         
@@ -58,20 +53,15 @@ async def run_client():
         except Exception as e:
             print(f"调用server_add_async失败: {e}")
             # 尝试直接调用，绕过stub
-            try:
-                result = await client.call('server_add_async', [6, 80], timeout=10.0)
-                print(f"直接调用server_add_async结果: {result}")
-            except Exception as e2:
-                print(f"直接调用server_add_async也失败: {e2}")
+
+        try:
+            result = await client.call('server_add_async', [6, 80], timeout=10.0)
+            print(f"直接调用server_add_async结果: {result}")
+        except Exception as e2:
+            print(f"直接调用server_add_async失败: {e2}")
         
         await asyncio.sleep(0.5)
         
-        try:
-            # 使用同步版本
-            result = server_add(6, 80)
-            print(f"server_add存根结果: {result}")
-        except Exception as e:
-            print(f"调用server_add存根失败: {e}")
         
         # 让客户端保持运行一段时间
         print("所有调用完成，客户端保持运行中...")

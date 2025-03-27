@@ -19,6 +19,7 @@ class Connection:
         
         
     async def send(self, data: bytes) -> None:
+        print(data)
         self.writer.write(data)
         await self.writer.drain()
         
@@ -35,6 +36,11 @@ class RPCServer:
         
         self._call_buffer:Dict[Tuple[str,str,Connection],Any] = {}
         self._call_buffer_lock = asyncio.Lock()
+        
+        # 新增任务管理相关属性
+        self._tasks = set()
+        self._max_tasks = 1000  # 最大并发任务数
+        self._task_semaphore = asyncio.Semaphore(self._max_tasks)
         
         self.register_method("init_connect",self._init_connect)
 
@@ -97,62 +103,97 @@ class RPCServer:
             print(f"连接关闭：{addr}")
 
     async def handle_call_buffer(self):
+        """处理调用缓冲区中的结果"""
         while self._started:
-            async with self._call_buffer_lock:
-                for (timestamp,id,connection), result in self._call_buffer.items():
-                    response = {'type': 'return', 'timestamp': timestamp, 'id':id,'result': result}
-                    await self.send_response(connection, response)
-                self._call_buffer.clear()
-            await asyncio.sleep(0.01)
-                
+            try:
+                async with self._call_buffer_lock:
+                    if not self._call_buffer:
+                        await asyncio.sleep(0.1)  # 增加sleep时间
+                        continue
+                        
+                    # 批量处理结果
+                    tasks = []
+                    for (timestamp,id,connection), result in self._call_buffer.items():
+                        response = {'type': 'return', 'timestamp': timestamp, 'id':id,'result': result}
+                        tasks.append(self.send_response(connection, response))
+                    
+                    # 并行发送响应
+                    await asyncio.gather(*tasks)
+                    self._call_buffer.clear()
+                    
+            except Exception as e:
+                print(f"处理调用缓冲区时出错: {e}")
+                await asyncio.sleep(0.1)
 
-    async def _compute_result(self,timestamp:float,id:str,connection:Connection,result):
-        result = await result
-        async with self._call_buffer_lock:
-            self._call_buffer[(timestamp,id,connection)] = result
+    async def _create_task(self, coro):
+        """创建受管理的任务"""
+        async with self._task_semaphore:
+            if len(self._tasks) >= self._max_tasks:
+                raise Exception("达到最大并发任务数限制")
+                
+            task = asyncio.create_task(coro)
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            return task
+
+    async def _compute_result(self, timestamp:float, id:str, connection:Connection, result):
+        """计算异步结果并存储到缓冲区"""
+        try:
+            result = await asyncio.wait_for(result, timeout=30.0)
+            async with self._call_buffer_lock:
+                self._call_buffer[(timestamp, id, connection)] = result
+        except asyncio.TimeoutError:
+            async with self._call_buffer_lock:
+                self._call_buffer[(timestamp, id, connection)] = {"error": "方法执行超时"}
+        except Exception as e:
+            async with self._call_buffer_lock:
+                self._call_buffer[(timestamp, id, connection)] = {"error": str(e)}
     
     async def on_data(self, connection: Connection, data: bytes) -> None:
+        """处理接收到的数据"""
         try:
             msg = json.loads(data.decode('utf-8'))
             
             if not utils.verify_msg(msg):
                 raise Exception('消息格式错误')
-        except Exception as e:
-            error_response = {'error': str(e)}
-            await self.send_response(connection, error_response)
-            return
-        
-        msg_type = msg.get('type')
-        
-        if msg_type == 'call':
-            try:
+                
+            msg_type = msg.get('type')
+
+            # print(msg)
+            
+            if msg_type == 'call':
                 timestamp = msg.get('timestamp')
                 id:str = msg.get('id')
                 method_name = msg.get('method')
                 args = msg.get('args', [])
                 kwargs = msg.get('kwargs', {})
                 method = self.methods.get(method_name)
+                
                 if not method:
                     error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': f"方法 {method_name} 未找到"}
                     await self.send_response(connection, error_response)
                     return
                     
-                # 处理同步和异步方法
-                result = method(*args, **kwargs)
-
-                # 异步方法异步执行完后才发送返回消息
-                if asyncio.iscoroutine(result):
-                    msg['connection'] = connection 
-                    asyncio.create_task(self._compute_result(timestamp, id, connection, result))
-                    return
+                try:
+                    # 处理同步和异步方法
+                    result = method(*args, **kwargs)
                     
-                response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
-                await self.send_response(connection, response)
-            except Exception as e:
-                error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': str(e)}
-                await self.send_response(connection, error_response)
-        else:
-            return
+                    if asyncio.iscoroutine(result):
+                        # 使用任务管理创建异步任务
+                        await self._create_task(self._compute_result(timestamp, id, connection, result))
+                    else:
+                        response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
+                        await self.send_response(connection, response)
+                        
+                except Exception as e:
+                    error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': str(e)}
+                    await self.send_response(connection, error_response)
+            else:
+                return
+                
+        except Exception as e:
+            error_response = {'error': str(e)}
+            await self.send_response(connection, error_response)
     
     async def send_response(self, connection: Connection, response: Dict):
         # 将响应转换为JSON并发送
@@ -184,10 +225,9 @@ class RPCServer:
             print(f'服务器启动在 {addr}')
 
             # 启动异步任务 返回客户端的调用结果
-            asyncio.create_task(self.handle_call_buffer())
-
-            
-
+            buffer_task = asyncio.create_task(self.handle_call_buffer())
+            self._tasks.add(buffer_task)
+            buffer_task.add_done_callback(self._tasks.discard)
             
             async with self.server:
                 await self.server.serve_forever()
@@ -206,6 +246,17 @@ class RPCServer:
         if self.server:
             self.server.close()
             await self.server.wait_closed()
+            
+        # 取消所有未完成的任务
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    print(f"取消任务时出错: {e}")
             
         # 关闭所有客户端连接
         close_tasks = []

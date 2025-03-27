@@ -32,21 +32,16 @@ class RPCClient:
 
 
     def server_method_stub(self, func: Callable):
-        def sync_wrapper(*args, **kwargs):
-            # 非异步函数的处理
-            result = self.call_sync(func.__name__, args, kwargs)
-            return result
-        
-        async def async_wrapper(*args, **kwargs):
+        async def wrapper(*args, **kwargs):
             # 异步函数的处理
             result = await self.call(func.__name__, args, kwargs)
             return result
         
         # 判断是否为异步函数
         if inspect.iscoroutinefunction(func):
-            return async_wrapper
+            return wrapper
         else:
-            return sync_wrapper
+            raise SyntaxError("异步函数必须使用async def定义")
     
     # 装饰器注册方法
     def method(self, func: Callable):
@@ -118,6 +113,9 @@ class RPCClient:
             return
         
         msg_type = msg.get('type')
+
+        # print("客户端消息")
+        # print(msg)
         
         
         if msg_type == 'return':
@@ -150,6 +148,8 @@ class RPCClient:
             length_bytes = length.to_bytes(4, byteorder='big')
             
             # 发送数据
+            # print("客户端发送数据")
+            # print(data)
             self.writer.write(length_bytes + data)
             await self.writer.drain()
         except Exception as e:
@@ -210,40 +210,7 @@ class RPCClient:
         
         raise TimeoutError(f"调用方法 {method} 超时（{timeout}秒）")
 
-    def call_sync(self, method: str, params: List = None, kwargs: Dict = None, timeout: float = 5.0) -> Any:
-        """
-        同步调用远程方法（在已存在的事件循环内使用）
-        
-        参数:
-            method: 要调用的方法名
-            params: 位置参数列表 
-            kwargs: 关键字参数字典
-            timeout: 超时时间（秒）
-            
-        返回:
-            方法的返回值，如果出现错误则抛出异常
-        """
-        if self._loop is None:
-            raise RuntimeError("客户端未启动，无法使用同步调用")
-        
-
-        loop = asyncio.get_running_loop()
-
-        
-        future = asyncio.run_coroutine_threadsafe(
-            self.call(method, params, kwargs, timeout),
-            loop
-        )
-        
-        try:
-            # 同步等待结果，可以设置超时
-            result = future.result(timeout=5)
-            return result
-        except concurrent.futures.TimeoutError as e:
-            raise TimeoutError("远程调用超时无响应") from e
-        except Exception as e:
-            raise Exception(f"远程调用失败: {e}") from e
-        
+    
         
 
 
