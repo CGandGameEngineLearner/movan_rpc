@@ -3,6 +3,7 @@ import json
 import time
 import inspect
 import uuid
+import concurrent.futures
 from typing import Dict, Any, Callable, Tuple, Optional, List, Union
 import utils
 
@@ -48,16 +49,16 @@ class RPCServer:
     def client_method_stub(self, func: Callable):
         def sync_wrapper(*args, **kwargs):
             # 非异步函数的处理
-            if not isinstance(args[0], AddressType):
+            if not isinstance(args[0], tuple):
                 raise Exception("第一个参数必须是AddressType类型的IP地址")
-            result = self.call_sync(func.__name__, *args, **kwargs)
+            result = self.call_sync(func.__name__, args, kwargs)
             return result
         
         async def async_wrapper(*args, **kwargs):
             # 异步函数的处理
-            if not isinstance(args[0], AddressType):
+            if not isinstance(args[0], tuple):
                 raise Exception("第一个参数必须是AddressType类型的IP地址")
-            result = await self.call(func.__name__, *args, **kwargs)
+            result = await self.call(func.__name__, args, kwargs)
             return result
         
         # 判断是否为异步函数
@@ -79,25 +80,48 @@ class RPCServer:
         
         try:
             while True:
-                # 读取长度头部（4字节整数）
-                length_bytes = await reader.readexactly(4)
-                length = int.from_bytes(length_bytes, byteorder='big')
-                
-                # 读取实际数据
-                data = await reader.readexactly(length)
-                await self.on_data(connection, data)
-                await self.handle_call_buffer()
-
-                
+                try:
+                    # 读取长度头部（4字节整数）
+                    length_bytes = await asyncio.wait_for(reader.readexactly(4), timeout=30.0)  # 添加超时
+                    length = int.from_bytes(length_bytes, byteorder='big')
+                    
+                    # 读取实际数据
+                    data = await asyncio.wait_for(reader.readexactly(length), timeout=30.0)  # 添加超时
+                    await self.on_data(connection, data)
+                    await self.handle_call_buffer()
+                except asyncio.TimeoutError:
+                    print(f"连接 {addr} 读取超时，发送心跳检测...")
+                    try:
+                        # 可以在这里实现心跳机制
+                        # 发送一个简单的ping消息
+                        ping_msg = {'type': 'ping', 'timestamp': str(time.time()), 'id': 'heartbeat'}
+                        await self.send_response(connection, ping_msg)
+                        continue  # 继续监听
+                    except Exception:
+                        print(f"心跳检测失败，断开连接 {addr}")
+                        break  # 退出循环，关闭连接
                 
         except asyncio.IncompleteReadError:
             # 连接关闭
-            pass
+            print(f"连接 {addr} 被客户端关闭")
+        except ConnectionResetError as e:
+            print(f"连接 {addr} 被重置: {e}")
         except Exception as e:
-            print(f"处理连接异常: {e}")
+            print(f"处理连接 {addr} 异常: {e}")
         finally:
-            writer.close()
-            await writer.wait_closed()
+            try:
+                writer.close()
+                try:
+                    # 使用超时避免无限等待
+                    await asyncio.wait_for(writer.wait_closed(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    print(f"等待连接 {addr} 关闭超时")
+                except Exception as e:
+                    print(f"关闭连接 {addr} 时出错: {e}")
+            except Exception as e:
+                print(f"关闭写入器时出错 {addr}: {e}")
+                
+            # 从连接列表中移除
             if addr in self.connections:
                 del self.connections[addr]
             print(f"连接关闭：{addr}")
@@ -123,7 +147,7 @@ class RPCServer:
                 raise Exception('消息格式错误')
         except Exception as e:
             error_response = {'error': str(e)}
-            await self.send_response(connection,error_response)
+            await self.send_response(connection, error_response)
             return
         
         msg_type = msg.get('type')
@@ -137,7 +161,7 @@ class RPCServer:
                 kwargs = msg.get('kwargs', {})
                 method = self.methods.get(method_name)
                 if not method:
-                    error_response = {'type': 'return', 'timestamp': timestamp, 'id': id,'error': f"方法 {method_name} 未找到"}
+                    error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': f"方法 {method_name} 未找到"}
                     await self.send_response(connection, error_response)
                     return
                     
@@ -147,7 +171,7 @@ class RPCServer:
                 # 异步方法异步执行完后才发送返回消息
                 if asyncio.iscoroutine(result):
                     msg['connection'] = connection 
-                    asyncio.create_task(self._compute_result(timestamp,id,connection,result))
+                    asyncio.create_task(self._compute_result(timestamp, id, connection, result))
                     return
                     
                 response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
@@ -158,20 +182,28 @@ class RPCServer:
         elif msg_type == 'return':
             try:
                 timestamp: float = msg.get('timestamp')
-                id:str = msg.get('id')
+                id: str = msg.get('id')
                 if timestamp is None:
                     return
                 error = msg.get('error')
                 if error:
                     async with self._return_buffer_lock:
-                        self.return_buffer[(timestamp,id)] = {'error': error}
+                        self.return_buffer[(timestamp, id)] = {'error': error}
                     return
                 result = msg.get('result')
                 async with self._return_buffer_lock:
-                    self.return_buffer[(timestamp,id)] = {'result': result}
+                    self.return_buffer[(timestamp, id)] = {'result': result}
             except Exception as e:
                 print(f"处理返回错误: {e}")
                 return
+        elif msg_type == 'ping':
+            # 处理心跳ping请求
+            pong_response = {'type': 'pong', 'timestamp': str(time.time()), 'id': msg.get('id', 'heartbeat')}
+            await self.send_response(connection, pong_response)
+        elif msg_type == 'pong':
+            # 处理心跳pong响应
+            # 这里可以更新最后收到心跳的时间戳
+            pass
         else:
             return
     
@@ -191,13 +223,22 @@ class RPCServer:
         if not self._started:
             raise RuntimeError("服务器尚未启动，无法调用")
             
-        # 创建一个Future来存储结果
-        future = asyncio.create_task(
-            self.call(client_address, method, params, kwargs, timeout)
+        loop = asyncio.get_running_loop()
+
+        
+        future = asyncio.run_coroutine_threadsafe(
+            self.call(client_address,method, params, kwargs, timeout),
+            loop
         )
         
-        # 等待结果返回
-        return future.result()
+        try:
+            # 同步等待结果，可以设置超时
+            result = future.result(timeout=5)
+            return result
+        except concurrent.futures.TimeoutError as e:
+            raise TimeoutError("远程调用超时无响应") from e
+        except Exception as e:
+            raise Exception(f"远程调用失败: {e}") from e
     
     async def call(self, client_address: AddressType, method: str, params: List = None, kwargs: Dict = None, timeout: float = 5.0) -> Any:
         """
@@ -261,21 +302,58 @@ class RPCServer:
         """启动服务器（异步）"""
         if self._started:
             return
+        
+        try:    
+            self._loop = asyncio.get_running_loop()
+            self._started = True
             
-        self._loop = asyncio.get_running_loop()
-        self._started = True
-        
-        self.server = await asyncio.start_server(
-            self.handle_connection, 
-            self.host, 
-            self.port
-        )
-        
-        addr = self.server.sockets[0].getsockname()
-        print(f'服务器启动在 {addr}')
-        
-        async with self.server:
-            await self.server.serve_forever()
+            self.server = await asyncio.start_server(
+                self.handle_connection, 
+                self.host, 
+                self.port,
+                # 增加一些服务器配置
+                backlog=100,  # 允许的最大连接数
+                reuse_address=True,  # 允许地址重用
+                start_serving=True
+            )
+            
+            addr = self.server.sockets[0].getsockname()
+            print(f'服务器启动在 {addr}')
+            
+
+            
+            async with self.server:
+                await self.server.serve_forever()
+        except Exception as e:
+            self._started = False
+            print(f"启动服务器时出错: {e}")
+            raise
+            
+    async def shutdown(self):
+        """优雅地关闭服务器"""
+        print("正在关闭服务器...")
+        if not self._started:
+            return
+            
+        # 关闭服务器
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
+            
+        # 关闭所有客户端连接
+        close_tasks = []
+        for addr, conn in list(self.connections.items()):
+            try:
+                conn.writer.close()
+                close_tasks.append(conn.writer.wait_closed())
+            except Exception as e:
+                print(f"关闭连接 {addr} 时出错: {e}")
+                
+        if close_tasks:
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+            
+        self._started = False
+        print("服务器已关闭")
     
     def run(self):
         """运行服务器（阻塞）"""

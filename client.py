@@ -1,7 +1,7 @@
 import asyncio
 import json
 import time
-
+import concurrent.futures
 import inspect
 from typing import Dict, Any, Callable, Optional, List, Union,Tuple
 import uuid
@@ -34,12 +34,12 @@ class RPCClient:
     def server_method_stub(self, func: Callable):
         def sync_wrapper(*args, **kwargs):
             # 非异步函数的处理
-            result = self.call_sync(func.__name__, *args, **kwargs)
+            result = self.call_sync(func.__name__, args, kwargs)
             return result
         
         async def async_wrapper(*args, **kwargs):
             # 异步函数的处理
-            result = await self.call(func.__name__, *args, **kwargs)
+            result = await self.call(func.__name__, args, kwargs)
             return result
         
         # 判断是否为异步函数
@@ -83,21 +83,37 @@ class RPCClient:
         """读取服务器消息的循环"""
         try:
             while self.connected:
-                # 读取长度头部（4字节整数）
-                length_bytes = await self.reader.readexactly(4)
-                length = int.from_bytes(length_bytes, byteorder='big')
-                
-                # 读取实际数据
-                data = await self.reader.readexactly(length)
-                await self._handle_data(data)
-                
-        except asyncio.IncompleteReadError:
-            # 连接关闭
-            self.connected = False
-            print("连接已关闭")
+                try:
+                    # 读取长度头部（4字节整数）
+                    length_bytes = await self.reader.readexactly(4)
+                    length = int.from_bytes(length_bytes, byteorder='big')
+                    
+                    # 读取实际数据
+                    data = await self.reader.readexactly(length)
+                    await self._handle_data(data)
+                except asyncio.IncompleteReadError:
+                    # 连接关闭或被中断
+                    print("服务器连接已断开")
+                    self.connected = False
+                    break
+                except ConnectionResetError as e:
+                    print(f"连接被重置: {e}")
+                    self.connected = False
+                    break
+                except Exception as e:
+                    print(f"读取数据错误: {e}")
+                    if not self.connected:  # 避免重复报错
+                        break
+                    await asyncio.sleep(0.5)  # 短暂暂停避免CPU占用过高
+            
+        except asyncio.CancelledError:
+            # 任务被取消，正常退出
+            print("读取循环任务已取消")
         except Exception as e:
-            print(f"读取数据错误: {e}")
+            print(f"读取循环发生未处理异常: {e}")
+        finally:
             self.connected = False
+            print("读取循环结束")
 
     async def _handle_data(self, data: bytes):
         try:
@@ -244,12 +260,24 @@ class RPCClient:
         """
         if self._loop is None:
             raise RuntimeError("客户端未启动，无法使用同步调用")
+        
+
+        loop = asyncio.get_running_loop()
 
         
-        future = asyncio.create_task(
-            self.call(method, params, kwargs, timeout)
+        future = asyncio.run_coroutine_threadsafe(
+            self.call(method, params, kwargs, timeout),
+            loop
         )
-        return future.result()  # 这会阻塞直到结果返回
+        
+        try:
+            # 同步等待结果，可以设置超时
+            result = future.result(timeout=5)
+            return result
+        except concurrent.futures.TimeoutError as e:
+            raise TimeoutError("远程调用超时无响应") from e
+        except Exception as e:
+            raise Exception(f"远程调用失败: {e}") from e
         
         
 
@@ -265,9 +293,34 @@ class RPCClient:
         # 启动读取循环
         self._running_task = asyncio.create_task(self._read_loop())
         
+        # 启动心跳任务
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        
         # 触发启动回调
         await self.on_connect()
         return True
+        
+    async def _heartbeat_loop(self):
+        """定期发送心跳以保持连接活跃"""
+        try:
+            while self.connected:
+                try:
+                    # 每5秒发送一次心跳
+                    await asyncio.sleep(5)
+                    if self.connected and self.writer:
+                        ping_msg = {'type': 'ping', 'timestamp': str(time.time()), 'id': 'heartbeat'}
+                        await self._send_message(ping_msg)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    print(f"发送心跳时出错: {e}")
+                    if not self.connected:
+                        break
+                    await asyncio.sleep(1)  # 错误后短暂暂停
+        except asyncio.CancelledError:
+            pass  # 任务被取消，正常退出
+        except Exception as e:
+            print(f"心跳循环异常: {e}")
         
     async def on_connect(self):
         """连接成功后的回调（可以重写）"""
@@ -285,22 +338,72 @@ class RPCClient:
         
     async def start(self):
         """运行客户端主循环"""
-        if await self.start_async():
-            # 保持客户端运行
-            try:
-                while self.connected:
-                    await asyncio.sleep(0.01)
-            except KeyboardInterrupt:
-                print("客户端正在关闭...")
-            finally:
-                await self.close()
+        try:
+            if await self.start_async():
+                # 保持客户端运行
+                try:
+                    reconnect_attempts = 0
+                    max_reconnect_attempts = 3
+                    
+                    while self.connected or reconnect_attempts < max_reconnect_attempts:
+                        if not self.connected:
+                            reconnect_attempts += 1
+                            print(f"尝试重新连接 ({reconnect_attempts}/{max_reconnect_attempts})...")
+                            if await self.start_async():
+                                reconnect_attempts = 0  # 重置重连计数
+                            else:
+                                await asyncio.sleep(2)  # 重连间隔
+                        else:
+                            reconnect_attempts = 0  # 连接正常时重置重连计数
+                            await asyncio.sleep(0.1)  # 减少CPU占用
+                            
+                except KeyboardInterrupt:
+                    print("客户端正在关闭...")
+        except Exception as e:
+            print(f"客户端运行出错: {e}")
+        finally:
+            await self.close()
+            print("客户端已关闭")
                 
     async def close(self):
         """关闭连接"""
-        if self.writer:
-            self.writer.close()
-            await self.writer.wait_closed()
         self.connected = False
+        
+        # 取消心跳任务
+        if hasattr(self, '_heartbeat_task') and self._heartbeat_task:
+            try:
+                self._heartbeat_task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._heartbeat_task), 0.5)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # 预期的结果
+            except Exception as e:
+                print(f"取消心跳任务时出现错误: {e}")
+        
+        # 取消读取循环任务
         if self._running_task:
-            self._running_task.cancel()
+            try:
+                self._running_task.cancel()
+                try:
+                    await asyncio.wait_for(asyncio.shield(self._running_task), 0.5)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # 预期的结果
+            except Exception as e:
+                print(f"取消读取任务时出现错误: {e}")
+                
+        # 关闭写入器
+        if self.writer:
+            try:
+                self.writer.close()
+                try:
+                    # 添加超时以避免在连接已断开时无限等待
+                    await asyncio.wait_for(self.writer.wait_closed(), 2.0)
+                except asyncio.TimeoutError:
+                    print("等待连接关闭超时")
+                except ConnectionResetError:
+                    print("连接已被远程端重置")
+                except Exception as e:
+                    print(f"关闭连接时出现错误: {e}")
+            except Exception as e:
+                print(f"关闭写入器时出现错误: {e}")
 
