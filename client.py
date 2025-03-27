@@ -5,7 +5,8 @@ import concurrent.futures
 import inspect
 from typing import Dict, Any, Callable, Optional, List, Union,Tuple
 import uuid
-import utils
+from . import utils
+
 
 class RPCClient:
     def __init__(self, address: str, port: int):

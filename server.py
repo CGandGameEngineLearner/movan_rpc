@@ -5,7 +5,7 @@ import inspect
 import uuid
 import concurrent.futures
 from typing import Dict, Any, Callable, Tuple, Optional, List, Union
-import utils
+from . import utils
 
 
 # 定义地址类型
