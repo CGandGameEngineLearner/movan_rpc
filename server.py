@@ -68,7 +68,7 @@ class RPCServer:
                 # 读取实际数据
                 data = await asyncio.wait_for(reader.readexactly(length), timeout=30.0)  # 添加超时
                 await self.on_data(connection, data)
-                await self.handle_call_buffer()
+                
 
                 
         except asyncio.IncompleteReadError:
@@ -97,12 +97,14 @@ class RPCServer:
             print(f"连接关闭：{addr}")
 
     async def handle_call_buffer(self):
-        async with self._call_buffer_lock:
-            for (timestamp,id,connection), result in self._call_buffer.items():
-                response = {'type': 'return', 'timestamp': timestamp, 'id':id,'result': result}
-                await self.send_response(connection, response)
-            self._call_buffer.clear()
-            
+        while self._started:
+            async with self._call_buffer_lock:
+                for (timestamp,id,connection), result in self._call_buffer.items():
+                    response = {'type': 'return', 'timestamp': timestamp, 'id':id,'result': result}
+                    await self.send_response(connection, response)
+                self._call_buffer.clear()
+            await asyncio.sleep(0.01)
+                
 
     async def _compute_result(self,timestamp:float,id:str,connection:Connection,result):
         result = await result
@@ -180,6 +182,10 @@ class RPCServer:
             
             addr = self.server.sockets[0].getsockname()
             print(f'服务器启动在 {addr}')
+
+            # 启动异步任务 返回客户端的调用结果
+            asyncio.create_task(self.handle_call_buffer())
+
             
 
             
