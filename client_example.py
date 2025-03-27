@@ -2,13 +2,7 @@ from client import RPCClient
 import asyncio
 client = RPCClient('127.0.0.1', 9999)
 
-@client.method
-def client_subtract(a, b):
-    return a - b
 
-@client.method
-def client_hello(data:str):
-    return data + "   Hello,I am Client!"
 
 @client.server_method_stub
 def server_add(a:int, b:int):
@@ -41,8 +35,8 @@ async def run_client():
         
         # 使用异常处理保护每一次调用
         try:
-            result = await client.call('server_add', [6, 2])
-            print(f"server_add结果: {result}")
+            result = client.call_sync('server_add', [6, 2], timeout=10.0)
+            print(f"第一次server_add结果: {result}")
         except Exception as e:
             print(f"调用server_add失败: {e}")
         
@@ -63,12 +57,18 @@ async def run_client():
             print(f"server_add_async结果: {result}")
         except Exception as e:
             print(f"调用server_add_async失败: {e}")
+            # 尝试直接调用，绕过stub
+            try:
+                result = await client.call('server_add_async', [6, 80], timeout=10.0)
+                print(f"直接调用server_add_async结果: {result}")
+            except Exception as e2:
+                print(f"直接调用server_add_async也失败: {e2}")
         
         await asyncio.sleep(0.5)
         
         try:
-            # 使用异步版本
-            result = await server_add(6, 80)
+            # 使用同步版本
+            result = server_add(6, 80)
             print(f"server_add存根结果: {result}")
         except Exception as e:
             print(f"调用server_add存根失败: {e}")
@@ -94,9 +94,4 @@ async def run_client():
         
         print("客户端已完成执行")
 
-try:
-    asyncio.run(run_client())
-except KeyboardInterrupt:
-    print("\n客户端已通过键盘中断停止")
-except Exception as e:
-    print(f"运行客户端时发生未捕获异常: {e}")
+asyncio.run(run_client())

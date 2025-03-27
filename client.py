@@ -15,13 +15,13 @@ class RPCClient:
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.connected = False
-        self._return_buffer: Dict[(str,str), Dict[str, Any]] = {}
+        
         self._running_task = None
         self._loop = None
 
+        self._return_buffer: Dict[(str,str), Dict[str, Any]] = {}
         self._return_buffer_lock = asyncio.Lock()
-        self._call_buffer:Dict[Tuple[str,str],Any] = {}
-        self._call_buffer_lock = asyncio.Lock()
+
 
 
     def register_method(self, name: str, method: Callable):
@@ -53,18 +53,10 @@ class RPCClient:
         self.register_method(func.__name__, func)
         return func
     
-    async def handle_call_buffer(self):
-        async with self._call_buffer_lock:
-            for (timestamp,id), result in self._call_buffer.items():
-                response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
-                await self._send_message(response)
-            self._call_buffer.clear()
+
             
 
-    async def _compute_result(self,timestamp:float,id:str,result):
-        result = await result
-        async with self._call_buffer_lock:
-            self._call_buffer[(timestamp,id)] = result
+
 
     async def connect(self):
         """连接到服务器"""
@@ -117,7 +109,7 @@ class RPCClient:
 
     async def _handle_data(self, data: bytes):
         try:
-            msg = json.loads(data.decode('utf-8'))
+            msg:dict = json.loads(data.decode('utf-8'))
             
             if not utils.verify_msg(msg):
                 raise Exception('消息格式错误')
@@ -127,38 +119,11 @@ class RPCClient:
         
         msg_type = msg.get('type')
         
-        if msg_type == 'call':
-            try:
-                timestamp = msg.get('timestamp')
-                id:str = msg.get('id')
-                method_name = msg.get('method')
-                args = msg.get('args', [])
-                kwargs = msg.get('kwargs', {})
-                method = self.methods.get(method_name)
-                if not method:
-                    error_response = {'type': 'return', 'timestamp': timestamp, 'id': id,'error': f"方法 {method_name} 未找到"}
-                    await self._send_message(error_response)
-                    return
-                    
-                # 处理同步和异步方法
-                result = method(*args, **kwargs)
-
-                # 异步方法异步执行完后才发送返回消息
-                if asyncio.iscoroutine(result):
-                    asyncio.create_task(self._compute_result(timestamp,id,result))
-                    return
-                    
-                response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'result': result}
-                await self._send_message(response)
-            except Exception as e:
-                error_response = {'type': 'return', 'timestamp': timestamp, 'id': id, 'error': str(e)}
-                await self._send_message(error_response)
-        elif msg_type == 'return':
+        
+        if msg_type == 'return':
             try:
                 timestamp: float = msg.get('timestamp')
                 id:str = msg.get('id')
-                if timestamp is None:
-                    return
                 error = msg.get('error')
                 if error:
                     async with self._return_buffer_lock:
@@ -293,34 +258,12 @@ class RPCClient:
         # 启动读取循环
         self._running_task = asyncio.create_task(self._read_loop())
         
-        # 启动心跳任务
-        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         
         # 触发启动回调
         await self.on_connect()
         return True
         
-    async def _heartbeat_loop(self):
-        """定期发送心跳以保持连接活跃"""
-        try:
-            while self.connected:
-                try:
-                    # 每5秒发送一次心跳
-                    await asyncio.sleep(5)
-                    if self.connected and self.writer:
-                        ping_msg = {'type': 'ping', 'timestamp': str(time.time()), 'id': 'heartbeat'}
-                        await self._send_message(ping_msg)
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    print(f"发送心跳时出错: {e}")
-                    if not self.connected:
-                        break
-                    await asyncio.sleep(1)  # 错误后短暂暂停
-        except asyncio.CancelledError:
-            pass  # 任务被取消，正常退出
-        except Exception as e:
-            print(f"心跳循环异常: {e}")
+
         
     async def on_connect(self):
         """连接成功后的回调（可以重写）"""
@@ -369,17 +312,7 @@ class RPCClient:
         """关闭连接"""
         self.connected = False
         
-        # 取消心跳任务
-        if hasattr(self, '_heartbeat_task') and self._heartbeat_task:
-            try:
-                self._heartbeat_task.cancel()
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._heartbeat_task), 0.5)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass  # 预期的结果
-            except Exception as e:
-                print(f"取消心跳任务时出现错误: {e}")
-        
+
         # 取消读取循环任务
         if self._running_task:
             try:
