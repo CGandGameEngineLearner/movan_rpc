@@ -178,7 +178,7 @@ class RPCServer:
                     # 处理同步和异步方法
                     result = method(*args, **kwargs)
                     
-                    if asyncio.iscoroutine(result):
+                    if asyncio.iscoroutine(result):                                                                                                                                                                                       
                         # 使用任务管理创建异步任务
                         await self._create_task(self._compute_result(timestamp, id, connection, result))
                     else:
