@@ -1,4 +1,4 @@
-from server import RPCServer,AddressType
+from movan_rpc import RPCServer,AddressType
 import asyncio
 import time
 

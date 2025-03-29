@@ -1,4 +1,4 @@
-from client import RPCClient
+from movan_rpc import RPCClient
 import asyncio
 client = RPCClient('127.0.0.1', 9999)
 
@@ -65,9 +65,9 @@ async def run_client():
 
         try:
             result = await server_hello("hello")
-            print(f"直接调用server_add_async结果: {result}")
+            print(f"server_hello结果: {result}")
         except Exception as e2:
-            print(f"直接调用server_add_async失败: {e2}")
+            print(f"server_hello失败: {e2}")
         
         await asyncio.sleep(0.5)
         
