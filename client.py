@@ -42,7 +42,7 @@ class RPCClient:
         if inspect.iscoroutinefunction(func):
             return wrapper
         else:
-            raise SyntaxError("异步函数必须使用async def定义")
+            raise SyntaxError("服务端方法的存根函数必须使用async def定义")
     
     # 装饰器注册方法
     def method(self, func: Callable):

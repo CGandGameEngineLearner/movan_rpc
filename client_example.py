@@ -5,14 +5,17 @@ client = RPCClient('127.0.0.1', 9999)
 
 
 @client.server_method_stub
-async def server_add(a:int, b:int):
+async def server_add(a:int, b:int)->int:
     pass
 
 @client.server_method_stub
-async def server_add_async(a:int, b:int):
+async def server_add_async(a:int, b:int)->int:
     pass
 
 
+@client.server_method_stub
+async def server_hello(hello:str):
+    pass
 
 
 async def run_client():
@@ -56,6 +59,12 @@ async def run_client():
 
         try:
             result = await client.call('server_add_async', [6, 80], timeout=10.0)
+            print(f"直接调用server_add_async结果: {result}")
+        except Exception as e2:
+            print(f"直接调用server_add_async失败: {e2}")
+
+        try:
+            result = await server_hello("hello")
             print(f"直接调用server_add_async结果: {result}")
         except Exception as e2:
             print(f"直接调用server_add_async失败: {e2}")
