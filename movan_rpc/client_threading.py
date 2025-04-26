@@ -97,7 +97,7 @@ class RPCClientThreading:
                     print(f"读取数据错误: {e}")
                     if not self.connected:  # 避免重复报错
                         break
-                    time.sleep(0.015)  # 短暂暂停避免CPU占用过高
+                    time.sleep(0.1)  # 短暂暂停避免CPU占用过高
             
         except Exception as e:
             print(f"读取循环发生未处理异常: {e}")
@@ -108,6 +108,7 @@ class RPCClientThreading:
     def _handle_data(self, data: bytes):
         try:
             msg: dict = json.loads(data.decode('utf-8'))
+            print(msg)
             
             if not utils.verify_msg(msg):
                 raise Exception('消息格式错误')
@@ -164,7 +165,7 @@ class RPCClientThreading:
 
 
 
-    def call(self, method: str, params: List = None, kwargs: Dict = None, call_back:Callable = None) -> CallId:
+    def call(self, method: str, call_back:Callable = None, params: List = None, kwargs: Dict = None) -> CallId:
         """
         同步调用客户端方法
         
@@ -199,23 +200,26 @@ class RPCClientThreading:
     
     def on_tick(self):
         with self.return_buffer_lock:
-            for (timestamp, id) in self._return_buffer.keys():
-                result_data = self._return_buffer[(timestamp, id)]
+            if len(self._return_buffer) > 0:
+                for (timestamp, id) in self._return_buffer.keys():
+                    result_data = self._return_buffer[(timestamp, id)]
+                    print(result_data)
+                    
+                    # 检查是否有错误
+                    if 'error' in result_data:
+                        print(result_data['error'])
+                    
+                    # 返回结果
+                    result = result_data.get('result')
+                    call_back = self._callback_buffer.get((timestamp, id))
+                    if call_back:
+                        try:
+                            call_back(result)
+                        except Exception as e:
+                            print(f"call back error: {e}")
+                        self._callback_buffer.pop((timestamp, id), None)
+                self._return_buffer.clear()
                 
-                # 检查是否有错误
-                if 'error' in result_data:
-                    print(result_data['error'])
-                
-                # 返回结果
-                result = result_data.get('result')
-                call_back = self._callback_buffer.get((timestamp, id))
-                if call_back:
-                    try:
-                        call_back(result)
-                    except Exception as e:
-                        print(f"call back error: {e}")
-            self._return_buffer.clear()
-            self._callback_buffer.clear()
         
         
 
@@ -240,7 +244,7 @@ class RPCClientThreading:
         # 示例: 调用远程方法
         try:
             result = self.call('init_connect')
-            print(f"远程调用结果: {result}")
+            # print(f"远程调用结果: {result}")
         except Exception as e:
             print(f"示例调用失败: {e}")
 
@@ -248,34 +252,7 @@ class RPCClientThreading:
         """同步启动客户端（阻塞）"""
         self.start()
         
-    def start(self):
-        """运行客户端主循环"""
-        try:
-            if self.start_sync():
-                # 保持客户端运行
-                try:
-                    reconnect_attempts = 0
-                    max_reconnect_attempts = 3
-                    
-                    while self.connected or reconnect_attempts < max_reconnect_attempts:
-                        if not self.connected:
-                            reconnect_attempts += 1
-                            print(f"尝试重新连接 ({reconnect_attempts}/{max_reconnect_attempts})...")
-                            if self.start_sync():
-                                reconnect_attempts = 0  # 重置重连计数
-                            else:
-                                time.sleep(2)  # 重连间隔
-                        else:
-                            reconnect_attempts = 0  # 连接正常时重置重连计数
-                            time.sleep(0.1)  # 减少CPU占用
-                            
-                except KeyboardInterrupt:
-                    print("客户端正在关闭...")
-        except Exception as e:
-            print(f"客户端运行出错: {e}")
-        finally:
-            self.close()
-            print("客户端已关闭")
+
                 
     def close(self):
         """关闭连接"""
