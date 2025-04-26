@@ -9,6 +9,7 @@ from typing import Dict, Any, Callable, Optional, List, Union, Tuple
 import uuid
 from . import utils
 
+CallId = Tuple[str,str]
 
 class RPCClientThreading:
     def __init__(self, address: str, port: int):
@@ -21,8 +22,8 @@ class RPCClientThreading:
         self._read_thread = None
         self._keep_running = False
 
-        self._return_buffer: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        self._callback_buffer: Dict[Tuple[str, str], Callable] = {}
+        self._return_buffer: Dict[CallId, Dict[str, Any]] = {}
+        self._callback_buffer: Dict[CallId, Callable] = {}
         self.return_buffer_lock = threading.Lock()
         self._socket_lock = threading.Lock()
         
@@ -156,10 +157,14 @@ class RPCClientThreading:
             self.connected = False
             raise e
         
+    def unbind_call_back(self, call_id: CallId):
+        """解除回调绑定"""
+        with self.return_buffer_lock:
+            self._callback_buffer.pop(call_id, None)
 
 
 
-    def call(self, method: str, params: List = None, kwargs: Dict = None, call_back:Callable = None) -> Any:
+    def call(self, method: str, params: List = None, kwargs: Dict = None, call_back:Callable = None) -> CallId:
         """
         同步调用客户端方法
         
@@ -189,6 +194,7 @@ class RPCClientThreading:
         }
         self._callback_buffer[(timestamp, id)] = call_back
         self._send_message(msg)
+        return (timestamp,id)
 
     
     def on_tick(self):
