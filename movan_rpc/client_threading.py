@@ -62,9 +62,11 @@ class RPCClientThreading:
             return False
 
     def _read_loop(self):
-        """读取服务器消息的循环"""
+        """读取服务器消息的循环"""        
+
         try:
             while self._keep_running and self.connected:
+                self._send_message({'type': 'heartbeat'})
                 try:
                     ready = select.select([self.socket], [], [], 0.5)
                     if ready[0]:
@@ -104,6 +106,10 @@ class RPCClientThreading:
         finally:
             self.connected = False
             print("读取循环结束")
+            
+            # 尝试重连
+            time.sleep(1)
+            self.start_sync()
 
     def _handle_data(self, data: bytes):
         try:
