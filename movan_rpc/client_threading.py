@@ -26,7 +26,7 @@ class RPCClientThreading:
         self._callback_buffer: Dict[CallId, Callable] = {}
         self.return_buffer_lock = threading.Lock()
         self._socket_lock = threading.Lock()
-        
+        self._last_heartbeat_time = time.time()
 
 
     def register_method(self, name: str, method: Callable):
@@ -66,8 +66,11 @@ class RPCClientThreading:
 
         try:
             while self._keep_running and self.connected:
-                self._send_message({'type': 'heartbeat'})
                 try:
+                    if self._last_heartbeat_time + 1 < time.time():
+                        self._send_message({'type': 'heartbeat'})
+                        self._last_heartbeat_time = time.time()
+                    # 使用 select 函数检查是否有可读数据
                     ready = select.select([self.socket], [], [], 0.5)
                     if ready[0]:
                         # 读取长度头部（4字节整数）
