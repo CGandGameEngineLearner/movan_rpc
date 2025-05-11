@@ -67,9 +67,10 @@ class RPCClientThreading:
         try:
             while self._keep_running and self.connected:
                 try:
-                    if self._last_heartbeat_time + 1 < time.time():
-                        self._send_message({'type': 'heartbeat'})
-                        self._last_heartbeat_time = time.time()
+                    timestamp = time.time()
+                    if self._last_heartbeat_time + 1 < timestamp:
+                        self._send_message({'type': 'heartbeat', 'timestamp': str(timestamp),"id":str(uuid.uuid4())})
+                        self._last_heartbeat_time = timestamp
                     # 使用 select 函数检查是否有可读数据
                     ready = select.select([self.socket], [], [], 0.5)
                     if ready[0]:
@@ -110,9 +111,10 @@ class RPCClientThreading:
             self.connected = False
             print("读取循环结束")
             
-            # 尝试重连
-            time.sleep(1)
-            self.start_sync()
+            if self._keep_running:
+                # 尝试重连
+                time.sleep(1)
+                self.start_sync()
 
     def _handle_data(self, data: bytes):
         try:
@@ -169,6 +171,8 @@ class RPCClientThreading:
         
     def unbind_call_back(self, call_id: CallId):
         """解除回调绑定"""
+        if not call_id:
+            return
         with self.return_buffer_lock:
             self._callback_buffer.pop(call_id, None)
 
@@ -222,10 +226,11 @@ class RPCClientThreading:
                     result = result_data.get('result')
                     call_back = self._callback_buffer.get((timestamp, id))
                     if call_back:
-                        try:
-                            call_back(result)
-                        except Exception as e:
-                            print(f"call back error: {e}")
+                        call_back(result)
+                        # try:
+                        #     call_back(result)
+                        # except Exception as e:
+                        #     print(f"call back error: {e}")
                         self._callback_buffer.pop((timestamp, id), None)
                 self._return_buffer.clear()
                 
