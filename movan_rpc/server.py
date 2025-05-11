@@ -153,7 +153,7 @@ class RPCServer:
         """处理接收到的数据"""
         try:
             msg = json.loads(data.decode('utf-8'))
-            
+            print(msg)
             if not utils.verify_msg(msg):
                 raise Exception('消息格式错误')
                 
