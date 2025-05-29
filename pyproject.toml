@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "movan_rpc"
-version = "0.1.0"
+version = "0.1.1"
 description = "一个轻量级的 RPC（远程过程调用）框架，使用 Python 标准库实现，无需第三方依赖"
 readme = "README.md"
 authors = [
