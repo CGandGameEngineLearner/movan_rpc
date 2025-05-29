@@ -10,4 +10,4 @@ from .client import RPCClient
 from .client_threading import RPCClientThreading
 
 __all__ = ['RPCServer', 'RPCClient', 'AddressType','RPCClientThreading']
-__version__ = '0.1.5'
+__version__ = '0.1.6'
