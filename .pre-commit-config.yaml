@@ -1,0 +1,24 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+    -   id: check-yaml
+    -   id: end-of-file-fixer
+    -   id: trailing-whitespace
+    -   id: check-added-large-files
+    -   id: check-toml
+
+-   repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: 'v0.0.262'
+    hooks:
+    -   id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+-   repo: local
+    hooks:
+    -   id: check-version-match
+        name: Check version matches
+        entry: python -c "import re; import sys; from pathlib import Path; pyproj = Path('pyproject.toml').read_text(); version = re.search(r'version = \"([^\"]+)\"', pyproj).group(1); sys.exit(0 if Path('VERSION').exists() and Path('VERSION').read_text().strip() == version else 1)"
+        language: python
+        pass_filenames: false
+        files: 'pyproject.toml|VERSION'
