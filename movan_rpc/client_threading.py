@@ -2,10 +2,8 @@ import json
 import time
 import socket
 import threading
-import inspect
-import queue
 import select
-from typing import Dict, Any, Callable, Optional, List, Union, Tuple
+from typing import Dict, Any, Callable, Optional, List, Tuple
 import uuid
 from . import utils
 
@@ -257,8 +255,8 @@ class RPCClientThreading:
         print('连接已建立')
         # 示例: 调用远程方法
         try:
-            result = self.call('init_connect')
-            # print(f"远程调用结果: {result}")
+            # 调用初始化连接方法，忽略结果
+            self.call('init_connect')
         except Exception as e:
             print(f"示例调用失败: {e}")
 

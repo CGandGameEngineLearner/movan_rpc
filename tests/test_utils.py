@@ -1,4 +1,3 @@
-import pytest
 from movan_rpc import utils
 
 def test_verify_msg():
@@ -8,7 +7,7 @@ def test_verify_msg():
         "timestamp": "1620000000.0",
         "id": "12345",
     }
-    assert utils.verify_msg(valid_msg) == True
+    assert utils.verify_msg(valid_msg)
     
     # 测试无效消息类型
     invalid_type_msg = {
@@ -16,7 +15,7 @@ def test_verify_msg():
         "timestamp": "1620000000.0",
         "id": "12345",
     }
-    assert utils.verify_msg(invalid_type_msg) == False
+    assert not utils.verify_msg(invalid_type_msg)
     
     # 测试无效时间戳
     invalid_timestamp_msg = {
@@ -24,7 +23,7 @@ def test_verify_msg():
         "timestamp": 1620000000.0,  # 数字而非字符串
         "id": "12345",
     }
-    assert utils.verify_msg(invalid_timestamp_msg) == False
+    assert not utils.verify_msg(invalid_timestamp_msg)
     
     # 测试无效ID
     invalid_id_msg = {
@@ -32,4 +31,4 @@ def test_verify_msg():
         "timestamp": "1620000000.0",
         "id": 12345,  # 数字而非字符串
     }
-    assert utils.verify_msg(invalid_id_msg) == False
+    assert not utils.verify_msg(invalid_id_msg)

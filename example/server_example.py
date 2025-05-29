@@ -1,6 +1,5 @@
-from movan_rpc import RPCServer,AddressType
+from movan_rpc import RPCServer
 import asyncio
-import time
 
 # 创建服务器
 server = RPCServer('127.0.0.1', 9999)
