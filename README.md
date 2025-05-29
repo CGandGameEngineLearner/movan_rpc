@@ -22,14 +22,14 @@
 ### 方法一：从 PyPI 安装
 
 ```bash
-pip install movan-rpc
+pip install movan_rpc
 ```
 
 ### 方法二：从源码安装
 
 ```bash
-git clone https://github.com/CGandGameEngineLearner/movan-rpc.git
-cd movan-rpc
+git clone https://github.com/CGandGameEngineLearner/movan_rpc.git
+cd movan_rpc
 pip install -e .
 ```
 

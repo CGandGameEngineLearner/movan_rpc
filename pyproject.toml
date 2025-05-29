@@ -3,7 +3,7 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "movan-rpc"
+name = "movan_rpc"
 version = "0.1.0"
 description = "一个轻量级的 RPC（远程过程调用）框架，使用 Python 标准库实现，无需第三方依赖"
 readme = "README.md"
@@ -25,10 +25,10 @@ classifiers = [
 keywords = ["rpc", "movan", "remote", "async", "network"]
 
 [project.urls]
-Homepage = "https://github.com/CGandGameEngineLearner/movan-rpc"
-"Bug Tracker" = "https://github.com/CGandGameEngineLearner/movan-rpc/issues"
-Documentation = "https://github.com/CGandGameEngineLearner/movan-rpc"
-Source = "https://github.com/CGandGameEngineLearner/movan-rpc"
+Homepage = "https://github.com/CGandGameEngineLearner/movan_rpc"
+"Bug Tracker" = "https://github.com/CGandGameEngineLearner/movan_rpc/issues"
+Documentation = "https://github.com/CGandGameEngineLearner/movan_rpc"
+Source = "https://github.com/CGandGameEngineLearner/movan_rpc"
 
 [tool.setuptools]
 package-dir = {"" = "."}
