@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "movan-rpc"
+version = "0.1.0"
+description = "一个轻量级的 RPC（远程过程调用）框架，使用 Python 标准库实现，无需第三方依赖"
+readme = "README.md"
+authors = [
+    {name = "lifesize", email = "lifesize1@qq.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet",
+]
+keywords = ["rpc", "movan", "remote", "async", "network"]
+
+[project.urls]
+Homepage = "https://github.com/CGandGameEngineLearner/movan-rpc"
+"Bug Tracker" = "https://github.com/CGandGameEngineLearner/movan-rpc/issues"
+Documentation = "https://github.com/CGandGameEngineLearner/movan-rpc"
+Source = "https://github.com/CGandGameEngineLearner/movan-rpc"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+packages = ["movan_rpc"]
