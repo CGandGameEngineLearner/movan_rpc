@@ -8,4 +8,4 @@ Movan RPC - 一个简单的 RPC（远程过程调用）框架
 from .movan_rpc import RPCServer as RPCServer, RPCClient as RPCClient, AddressType as AddressType,RPCClientThreading as RPCClientThreading
 
 __all__ = ['RPCServer', 'RPCClient', 'AddressType','RPCClientThreading']
-__version__ = '0.1.1'
+__version__ = '0.1.3'
